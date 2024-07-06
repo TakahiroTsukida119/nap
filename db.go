@@ -36,17 +36,17 @@ func Open(driverName, dataSourceNames string) (*DB, error) {
 	return db, nil
 }
 
-type CustomOpenFunc func(driverName, dataSourceName string, opts ...any) (*DB, error)
+type CustomOpenFunc[T any] func(driverName, dataSourceName string, opt T) (*DB, error)
 
 // CustomOpen concurrently opens each underlying physical db.
 // dataSourceNames must be a semi-comma separated list of DSNs with the first
 // one being used as the master and the rest as slaves.
-func CustomOpen(driverName, dataSourceNames string, open CustomOpenFunc, opts ...any) (*DB, error) {
+func CustomOpen[T any](driverName, dataSourceNames string, open CustomOpenFunc[T], opt T) (*DB, error) {
 	conns := strings.Split(dataSourceNames, ";")
 	db := &DB{pdbs: make([]*sql.DB, len(conns))}
 
 	err := scatter(len(db.pdbs), func(i int) (err error) {
-		db, err := open(driverName, conns[i], opts...)
+		db, err := open(driverName, conns[i], opt)
 		db.pdbs[i], err = sql.Open(driverName, conns[i])
 		return err
 	})
