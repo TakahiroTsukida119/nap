@@ -13,8 +13,8 @@ import (
 // forming a single master multiple slaves topology.
 // Reads and writes are automatically directed to the correct physical db.
 type DB struct {
-	pdbs  []*sql.DB // Physical databases
-	count uint64    // Monotonically incrementing counter on each query
+	Pdbs  []*sql.DB // Physical databases
+	Count uint64    // Monotonically incrementing counter on each query
 }
 
 // Open concurrently opens each underlying physical db.
@@ -22,32 +22,10 @@ type DB struct {
 // one being used as the master and the rest as slaves.
 func Open(driverName, dataSourceNames string) (*DB, error) {
 	conns := strings.Split(dataSourceNames, ";")
-	db := &DB{pdbs: make([]*sql.DB, len(conns))}
+	db := &DB{Pdbs: make([]*sql.DB, len(conns))}
 
-	err := scatter(len(db.pdbs), func(i int) (err error) {
-		db.pdbs[i], err = sql.Open(driverName, conns[i])
-		return err
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return db, nil
-}
-
-type CustomOpenFunc[T any] func(driverName, dataSourceName string, opt T) (*DB, error)
-
-// CustomOpen concurrently opens each underlying physical db.
-// dataSourceNames must be a semi-comma separated list of DSNs with the first
-// one being used as the master and the rest as slaves.
-func CustomOpen[T any](driverName, dataSourceNames string, open CustomOpenFunc[T], opt T) (*DB, error) {
-	conns := strings.Split(dataSourceNames, ";")
-	db := &DB{pdbs: make([]*sql.DB, len(conns))}
-
-	err := scatter(len(db.pdbs), func(i int) (err error) {
-		db, err := open(driverName, conns[i], opt)
-		db.pdbs[i], err = sql.Open(driverName, conns[i])
+	err := scatter(len(db.Pdbs), func(i int) (err error) {
+		db.Pdbs[i], err = sql.Open(driverName, conns[i])
 		return err
 	})
 
@@ -60,8 +38,8 @@ func CustomOpen[T any](driverName, dataSourceNames string, open CustomOpenFunc[T
 
 // Close closes all physical databases concurrently, releasing any open resources.
 func (db *DB) Close() error {
-	return scatter(len(db.pdbs), func(i int) error {
-		return db.pdbs[i].Close()
+	return scatter(len(db.Pdbs), func(i int) error {
+		return db.Pdbs[i].Close()
 	})
 }
 
@@ -101,26 +79,26 @@ func (db *DB) ExecContext(ctx context.Context, query string, args ...interface{}
 // Ping verifies if a connection to each physical database is still alive,
 // establishing a connection if necessary.
 func (db *DB) Ping() error {
-	return scatter(len(db.pdbs), func(i int) error {
-		return db.pdbs[i].Ping()
+	return scatter(len(db.Pdbs), func(i int) error {
+		return db.Pdbs[i].Ping()
 	})
 }
 
 // PingContext verifies if a connection to each physical database is still
 // alive, establishing a connection if necessary.
 func (db *DB) PingContext(ctx context.Context) error {
-	return scatter(len(db.pdbs), func(i int) error {
-		return db.pdbs[i].PingContext(ctx)
+	return scatter(len(db.Pdbs), func(i int) error {
+		return db.Pdbs[i].PingContext(ctx)
 	})
 }
 
 // Prepare creates a prepared statement for later queries or executions
 // on each physical database, concurrently.
 func (db *DB) Prepare(query string) (Stmt, error) {
-	stmts := make([]*sql.Stmt, len(db.pdbs))
+	stmts := make([]*sql.Stmt, len(db.Pdbs))
 
-	err := scatter(len(db.pdbs), func(i int) (err error) {
-		stmts[i], err = db.pdbs[i].Prepare(query)
+	err := scatter(len(db.Pdbs), func(i int) (err error) {
+		stmts[i], err = db.Pdbs[i].Prepare(query)
 		return err
 	})
 
@@ -137,10 +115,10 @@ func (db *DB) Prepare(query string) (Stmt, error) {
 // The provided context is used for the preparation of the statement, not for
 // the execution of the statement.
 func (db *DB) PrepareContext(ctx context.Context, query string) (Stmt, error) {
-	stmts := make([]*sql.Stmt, len(db.pdbs))
+	stmts := make([]*sql.Stmt, len(db.Pdbs))
 
-	err := scatter(len(db.pdbs), func(i int) (err error) {
-		stmts[i], err = db.pdbs[i].PrepareContext(ctx, query)
+	err := scatter(len(db.Pdbs), func(i int) (err error) {
+		stmts[i], err = db.Pdbs[i].PrepareContext(ctx, query)
 		return err
 	})
 
@@ -186,8 +164,8 @@ func (db *DB) QueryRowContext(ctx context.Context, query string, args ...interfa
 // new MaxIdleConns will be reduced to match the MaxOpenConns limit
 // If n <= 0, no idle connections are retained.
 func (db *DB) SetMaxIdleConns(n int) {
-	for i := range db.pdbs {
-		db.pdbs[i].SetMaxIdleConns(n)
+	for i := range db.Pdbs {
+		db.Pdbs[i].SetMaxIdleConns(n)
 	}
 }
 
@@ -198,8 +176,8 @@ func (db *DB) SetMaxIdleConns(n int) {
 // the new MaxOpenConns limit. If n <= 0, then there is no limit on the number
 // of open connections. The default is 0 (unlimited).
 func (db *DB) SetMaxOpenConns(n int) {
-	for i := range db.pdbs {
-		db.pdbs[i].SetMaxOpenConns(n)
+	for i := range db.Pdbs {
+		db.Pdbs[i].SetMaxOpenConns(n)
 	}
 }
 
@@ -207,24 +185,24 @@ func (db *DB) SetMaxOpenConns(n int) {
 // Expired connections may be closed lazily before reuse.
 // If d <= 0, connections are reused forever.
 func (db *DB) SetConnMaxLifetime(d time.Duration) {
-	for i := range db.pdbs {
-		db.pdbs[i].SetConnMaxLifetime(d)
+	for i := range db.Pdbs {
+		db.Pdbs[i].SetConnMaxLifetime(d)
 	}
 }
 
 // Slave returns one of the physical databases which is a slave
 func (db *DB) Slave() *sql.DB {
-	return db.pdbs[db.slave(len(db.pdbs))]
+	return db.Pdbs[db.slave(len(db.Pdbs))]
 }
 
 // Master returns the master physical database
 func (db *DB) Master() *sql.DB {
-	return db.pdbs[0]
+	return db.Pdbs[0]
 }
 
 func (db *DB) slave(n int) int {
 	if n <= 1 {
 		return 0
 	}
-	return int(1 + (atomic.AddUint64(&db.count, 1) % uint64(n-1)))
+	return int(1 + (atomic.AddUint64(&db.Count, 1) % uint64(n-1)))
 }
