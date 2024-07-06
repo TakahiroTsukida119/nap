@@ -36,6 +36,28 @@ func Open(driverName, dataSourceNames string) (*DB, error) {
 	return db, nil
 }
 
+type CustomOpenFunc func(driverName, dataSourceName string, opts ...any) (*DB, error)
+
+// CustomOpen concurrently opens each underlying physical db.
+// dataSourceNames must be a semi-comma separated list of DSNs with the first
+// one being used as the master and the rest as slaves.
+func CustomOpen(driverName, dataSourceNames string, open CustomOpenFunc, opts ...any) (*DB, error) {
+	conns := strings.Split(dataSourceNames, ";")
+	db := &DB{pdbs: make([]*sql.DB, len(conns))}
+
+	err := scatter(len(db.pdbs), func(i int) (err error) {
+		db, err := open(driverName, conns[i], opts...)
+		db.pdbs[i], err = sql.Open(driverName, conns[i])
+		return err
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
+
 // Close closes all physical databases concurrently, releasing any open resources.
 func (db *DB) Close() error {
 	return scatter(len(db.pdbs), func(i int) error {
